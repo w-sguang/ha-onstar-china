@@ -15,11 +15,34 @@ from .const import DOMAIN, EVENT_COMMAND
 
 _LOGGER = logging.getLogger(__name__)
 
-# key -> (显示名, 诊断字段名, 单位, device_class, state_class)
+# key, 显示名, 诊断字段名, 单位, device_class, state_class, 图标
 SENSORS = [
-    ("fuel_level", "油量", "FUEL LEVEL", "%", None, SensorStateClass.MEASUREMENT),
-    ("fuel_amount", "油量(升)", "FUEL AMOUNT", "L", None, SensorStateClass.MEASUREMENT),
-    ("fuel_capacity", "油箱容量", "FUEL CAPACITY", "L", None, SensorStateClass.MEASUREMENT),
+    ("fuel_level", "油量", "FUEL LEVEL", "%", None,
+     SensorStateClass.MEASUREMENT, "mdi:gas-station"),
+    ("fuel_amount", "油量(升)", "FUEL AMOUNT", "L", None,
+     SensorStateClass.MEASUREMENT, "mdi:gas-station"),
+    ("fuel_capacity", "油箱容量", "FUEL CAPACITY", "L", None,
+     SensorStateClass.MEASUREMENT, "mdi:gas-station-outline"),
+    ("range", "剩余续航", "GAS RANGE", "km", SensorDeviceClass.DISTANCE,
+     SensorStateClass.MEASUREMENT, "mdi:map-marker-distance"),
+    ("odometer", "总里程", "ODOMETER", "km", SensorDeviceClass.DISTANCE,
+     SensorStateClass.TOTAL_INCREASING, "mdi:counter"),
+    ("oil_life", "机油寿命", "OIL LIFE", "%", None,
+     SensorStateClass.MEASUREMENT, "mdi:oil"),
+    ("tire_lf", "胎压 左前", "TIRE PRESSURE LF", "kPa",
+     SensorDeviceClass.PRESSURE, SensorStateClass.MEASUREMENT, "mdi:tire"),
+    ("tire_rf", "胎压 右前", "TIRE PRESSURE RF", "kPa",
+     SensorDeviceClass.PRESSURE, SensorStateClass.MEASUREMENT, "mdi:tire"),
+    ("tire_lr", "胎压 左后", "TIRE PRESSURE LR", "kPa",
+     SensorDeviceClass.PRESSURE, SensorStateClass.MEASUREMENT, "mdi:tire"),
+    ("tire_rr", "胎压 右后", "TIRE PRESSURE RR", "kPa",
+     SensorDeviceClass.PRESSURE, SensorStateClass.MEASUREMENT, "mdi:tire"),
+    ("last_trip_distance", "上次行程里程", "LAST TRIP TOTAL DISTANCE", "km",
+     SensorDeviceClass.DISTANCE, None, "mdi:road-variant"),
+    ("last_trip_econ", "上次行程油耗", "LAST TRIP FUEL ECON", "km/L", None,
+     SensorStateClass.MEASUREMENT, "mdi:fuel"),
+    ("lifetime_econ", "综合油耗", "LIFETIME FUEL ECON", "km/L", None,
+     SensorStateClass.MEASUREMENT, "mdi:fuel"),
 ]
 
 
@@ -28,29 +51,34 @@ async def async_setup_entry(
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     async_add_entities(
-        OnStarSensor(coordinator, entry, key, name, field, unit, dclass, sclass)
-        for key, name, field, unit, dclass, sclass in SENSORS
+        OnStarSensor(coordinator, entry, *spec) for spec in SENSORS
     )
     async_add_entities([OnStarLastCommand(hass, entry)])
+
+
+def _device_info(entry: ConfigEntry) -> dict:
+    return {
+        "identifiers": {(DOMAIN, entry.data["vin"])},
+        "name": f"安吉星 {entry.data['vin'][-6:]}",
+        "manufacturer": "OnStar China",
+        "model": "上汽通用 OnStar 车辆",
+    }
 
 
 class OnStarSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, entry, key, name, field, unit, dclass, sclass):
+    def __init__(self, coordinator, entry, key, name, field, unit, dclass, sclass,
+                 icon):
         super().__init__(coordinator)
         self._field = field
         self._attr_name = name
         self._attr_native_unit_of_measurement = unit
         self._attr_device_class = dclass
         self._attr_state_class = sclass
+        self._attr_icon = icon
         self._attr_unique_id = f"{entry.data['vin']}_{key}"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.data["vin"])},
-            "name": f"安吉星 {entry.data['vin'][-6:]}",
-            "manufacturer": "OnStar China",
-            "model": "上汽通用 OnStar 车辆",
-        }
+        self._attr_device_info = _device_info(entry)
 
     @property
     def native_value(self):
@@ -61,6 +89,18 @@ class OnStarSensor(CoordinatorEntity, SensorEntity):
             return round(float(item["value"]), 2)
         except (TypeError, ValueError):
             return None
+
+    @property
+    def extra_state_attributes(self):
+        item = (self.coordinator.data or {}).get(self._field) or {}
+        attrs = {}
+        msg = (item.get("message") or "").strip()
+        if msg and msg.lower() != "na":
+            attrs["状态"] = "正常" if msg.upper() == "GREEN" else msg
+        meta = (self.coordinator.data or {}).get("_meta") or {}
+        if meta.get("updated"):
+            attrs["数据时间"] = meta["updated"]
+        return attrs
 
 
 class OnStarLastCommand(SensorEntity):
@@ -73,12 +113,7 @@ class OnStarLastCommand(SensorEntity):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
         self._attr_unique_id = f"{entry.data['vin']}_last_command"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.data["vin"])},
-            "name": f"安吉星 {entry.data['vin'][-6:]}",
-            "manufacturer": "OnStar China",
-            "model": "上汽通用 OnStar 车辆",
-        }
+        self._attr_device_info = _device_info(entry)
         self._state = "无"
         self._attrs: dict = {}
 
