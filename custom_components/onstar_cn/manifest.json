@@ -1,10 +1,11 @@
 {
   "domain": "onstar_cn",
   "name": "安吉星 OnStar (China)",
-  "version": "1.1.1",
+  "codeowners": ["@w-sguang"],
   "config_flow": true,
+  "documentation": "https://github.com/w-sguang/ha-onstar-china",
   "iot_class": "cloud_polling",
-  "codeowners": ["@xiaozhua"],
-  "documentation": "https://www.onstar.com.cn",
-  "requirements": []
+  "issue_tracker": "https://github.com/w-sguang/ha-onstar-china/issues",
+  "requirements": [],
+  "version": "1.1.2"
 }
