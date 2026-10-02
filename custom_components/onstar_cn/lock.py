@@ -7,9 +7,10 @@ from homeassistant.components import persistent_notification
 from homeassistant.components.lock import LockEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .api import OnStarApi
+from .api import OnStarApi, OnStarError
 from .const import CMD_LOCK, CMD_UNLOCK, DOMAIN, EVENT_COMMAND
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,8 +40,13 @@ class OnStarLock(LockEntity):
         }
 
     async def _do(self, cmd: str, locked: bool) -> None:
-        await self._api.async_run(cmd)
-        self._report("上锁" if locked else "解锁")
+        name = "上锁" if locked else "解锁"
+        try:
+            await self._api.async_run(cmd)
+        except OnStarError as err:
+            self._report(name, ok=False, res=self._api.last_result or {})
+            raise HomeAssistantError(f"安吉星{name}失败：{err}") from err
+        self._report(name, ok=True, res=self._api.last_result or {})
         self._attr_is_locked = locked
         self.async_write_ha_state()
 
@@ -50,18 +56,21 @@ class OnStarLock(LockEntity):
     async def async_unlock(self, **kwargs) -> None:
         await self._do(CMD_UNLOCK, False)
 
-    def _report(self, name: str) -> None:
-        res = self._api.last_result or {}
-        status = str(res.get("status", "unknown")).lower()
-        ok = status in ("success", "succeeded")
+    def _report(self, name: str, ok: bool, res: dict) -> None:
         self.hass.bus.async_fire(EVENT_COMMAND, {
             "name": name, "cmd": res.get("cmd"), "success": ok,
             "status": res.get("status"), "message": res.get("message"),
         })
         if ok:
             persistent_notification.async_dismiss(self.hass, "onstar_cn_cmd")
+            return
+        msg = res.get("message") or "未知错误"
+        if "服务密码" in msg:
+            title = "需要服务密码"
         else:
-            persistent_notification.async_create(
-                self.hass,
-                f"「{name}」执行失败\n状态：{res.get('status')}\n信息：{res.get('message') or '无'}",
-                title="安吉星指令失败", notification_id="onstar_cn_cmd")
+            title = "安吉星指令失败"
+        persistent_notification.async_create(
+            self.hass,
+            f"「{name}」执行失败\n状态：{res.get('status')}\n信息：{msg}",
+            title=title, notification_id="onstar_cn_cmd",
+        )

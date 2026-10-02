@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import OnStarApi, OnStarAuthError
-from .const import CONF_PERM_TOKEN, CONF_USERNAME, CONF_VIN, DOMAIN
+from .const import CONF_PERM_TOKEN, CONF_PIN, CONF_USERNAME, CONF_VIN, DOMAIN
 from .coordinator import OnStarCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         username=entry.data[CONF_USERNAME],
         perm_token=entry.data[CONF_PERM_TOKEN],
         vin=entry.data[CONF_VIN],
+        pin=entry.data.get(CONF_PIN),
     )
     coordinator = OnStarCoordinator(hass, api)
     try:

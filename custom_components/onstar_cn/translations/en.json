@@ -2,22 +2,47 @@
   "config": {
     "step": {
       "user": {
-        "title": "OnStar China",
-        "description": "Obtain a one-time login from the OnStar WeChat mini-program.\n\n1. Capture the mini-program login with Reqable/Charles\n2. Run `extract_token.py your.har` to get the fields below\n\n- User ID: idpUserId (e.g. LADPA017243106)\n- perm_token: from the login response\n- VIN: 17 chars",
-        "data": {"username": "User ID (idpUserId)", "perm_token": "perm_token", "vin": "VIN"}
+        "title": "OnStar China (安吉星)",
+        "description": "You need one captured login request from the OnStar **WeChat mini-program** (OnStar does not allow account/password login outside WeChat).\n\n**How to get it:**\n1. Capture mini-program traffic with Reqable / Charles / Stream\n2. Open the mini-program → Me → sign out → sign in again (WeChat one-tap login)\n3. Find the `oauth/wechatRegisterAndLogIn` request and copy:\n\n• **User ID**: `idpUserId`, e.g. `LADPA017243106`\n• **perm_token**: from the same login response (256 chars)\n• **VIN**: 17 characters\n\n**Service PIN (optional)**: locking / unlocking / remote start / horn & lights are *write* commands and require your OnStar service PIN (the one the app asks for). Leave it empty to use read-only vehicle data.",
+        "data": {
+          "username": "User ID (idpUserId)",
+          "perm_token": "perm_token",
+          "vin": "VIN",
+          "pin": "Service PIN (optional)"
+        },
+        "data_description": {
+          "username": "idpUserId field of the captured oauth/wechatRegisterAndLogIn request",
+          "perm_token": "perm_token from the same login response; refreshes itself long-term",
+          "vin": "17-character VIN",
+          "pin": "Required for write commands only; leave empty for read-only sensors"
+        }
       },
       "reconfigure": {
         "title": "Update OnStar credentials",
-        "description": "Update user ID / perm_token / VIN.",
-        "data": {"username": "User ID (idpUserId)", "perm_token": "perm_token", "vin": "VIN"}
+        "description": "Update user ID / perm_token / VIN / service PIN.\n\nperm_token cannot be left empty — capture a fresh one.",
+        "data": {
+          "username": "User ID (idpUserId)",
+          "perm_token": "perm_token",
+          "vin": "VIN",
+          "pin": "Service PIN (optional)"
+        }
       },
       "reauth_confirm": {
         "title": "OnStar login expired",
-        "description": "The perm_token for {vin} is no longer valid. Log in again in the WeChat mini-program, capture it, extract a new perm_token with extract_token.py, and paste it below.",
-        "data": {"perm_token": "New perm_token"}
+        "description": "The perm_token for {vin} is no longer valid (usually because the account signed in somewhere else).\n\nSign in again in the WeChat mini-program, capture the request and paste the new perm_token below.",
+        "data": {
+          "perm_token": "New perm_token"
+        }
       }
     },
-    "error": {"invalid_auth": "Invalid or expired perm_token / user ID", "cannot_connect": "Cannot reach OnStar server"},
-    "abort": {"already_configured": "Vehicle already configured", "reauth_successful": "Re-authentication successful"}
+    "error": {
+      "invalid_auth": "Invalid or expired perm_token / user ID — capture a fresh one",
+      "invalid_pin": "Wrong service PIN — please check it (leave empty if you don't need write commands)",
+      "cannot_connect": "Cannot reach the OnStar server"
+    },
+    "abort": {
+      "already_configured": "This vehicle is already configured",
+      "reauth_successful": "Re-authentication successful"
+    }
   }
 }

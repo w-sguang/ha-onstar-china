@@ -3,32 +3,41 @@
     "step": {
       "user": {
         "title": "安吉星 (OnStar China)",
-        "description": "需要从安吉星**微信小程序**抓一次登录请求（安吉星不允许微信外直接用账号密码登录）。\n\n获取方法：\n1. 用抓包工具（Reqable/Charles）抓小程序登录请求\n2. 把 HAR 文件用 `extract_token.py` 一跑，就得到下面三项\n\n• 用户 ID：idpUserId（形如 LADPA017243106）\n• perm_token：登录响应里的 perm_token\n• 车架号 VIN：17 位",
+        "description": "需要从安吉星 **微信小程序** 抓一次登录请求（安吉星不允许微信外直接用账号密码登录）。\n\n**如何获取：**\n1. 手机/电脑用抓包工具（Reqable、Charles、Stream 等）抓小程序请求\n2. 打开小程序 → 我的 → 退出登录 → 重新登录（微信一键登录）\n3. 在抓包里找 `oauth/wechatRegisterAndLogIn` 这条请求，取出：\n\n• **用户 ID**：`idpUserId`，形如 `LADPA017243106`\n• **perm_token**：登录响应里的 `perm_token`（256 位长串）\n• **车架号 VIN**：17 位，见行驶证\n\n**服务密码（选填）**：锁车 / 解锁 / 远程启动 / 闪灯鸣笛属于「写操作」，安吉星要求校验服务密码（就是你平时在 App 里做车控时输入的那个密码）。留空也能用，但只有车况只读功能可用。",
         "data": {
           "username": "用户 ID (idpUserId)",
           "perm_token": "perm_token",
-          "vin": "车架号 VIN"
+          "vin": "车架号 VIN",
+          "pin": "服务密码（选填）"
+        },
+        "data_description": {
+          "username": "抓包里 oauth/wechatRegisterAndLogIn 请求的 idpUserId 字段",
+          "perm_token": "同一条登录响应里的 perm_token，256 位、可长期免登录刷新",
+          "vin": "17 位车架号，行驶证上有",
+          "pin": "车控写操作需要；只读车况用不到，留空即可"
         }
       },
       "reconfigure": {
         "title": "修改安吉星凭据",
-        "description": "更新用户 ID / perm_token / 车架号。",
+        "description": "更新用户 ID / perm_token / 车架号 / 服务密码。\n\nperm_token 留空会校验失败，必须重新抓包填写。",
         "data": {
           "username": "用户 ID (idpUserId)",
           "perm_token": "perm_token",
-          "vin": "车架号 VIN"
+          "vin": "车架号 VIN",
+          "pin": "服务密码（选填）"
         }
       },
       "reauth_confirm": {
         "title": "安吉星登录已失效",
-        "description": "车辆 {vin} 的 perm_token 已失效（可能因为账号在别处重新登录过）。\n请在微信小程序里重新登录一次并抓包，用 extract_token.py 取出新的 perm_token 后填到下面。",
+        "description": "车辆 {vin} 的 perm_token 已失效（通常是因为账号在别处重新登录过，导致旧令牌被顶掉）。\n\n请在微信小程序里重新登录一次并抓包，取出新的 perm_token 填到下面。",
         "data": {
           "perm_token": "新的 perm_token"
         }
       }
     },
     "error": {
-      "invalid_auth": "认证失败：perm_token 或用户 ID 不正确（或已失效）",
+      "invalid_auth": "认证失败：perm_token 或用户 ID 不正确（或已失效），请重新抓包",
+      "invalid_pin": "服务密码不正确：请检查后重填（留空表示不需要车控写操作）",
       "cannot_connect": "无法连接到安吉星服务器"
     },
     "abort": {

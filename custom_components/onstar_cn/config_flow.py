@@ -8,14 +8,15 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import OnStarApi, OnStarAuthError, OnStarError
-from .const import CONF_PERM_TOKEN, CONF_USERNAME, CONF_VIN, DOMAIN
+from .api import OnStarApi, OnStarAuthError, OnStarError, OnStarPinError
+from .const import CONF_PERM_TOKEN, CONF_PIN, CONF_USERNAME, CONF_VIN, DOMAIN
 
 STEP_USER_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PERM_TOKEN): str,
         vol.Required(CONF_VIN): str,
+        vol.Optional(CONF_PIN, default=""): str,
     }
 )
 STEP_TOKEN_SCHEMA = vol.Schema({vol.Required(CONF_PERM_TOKEN): str})
@@ -24,11 +25,12 @@ STEP_TOKEN_SCHEMA = vol.Schema({vol.Required(CONF_PERM_TOKEN): str})
 class OnStarConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
-    async def _check(self, username: str, perm_token: str, vin: str) -> str | None:
+    async def _check(self, username: str, perm_token: str, vin: str,
+                     pin: str = "") -> str | None:
         """校验凭据；返回错误 key 或 None。"""
         api = OnStarApi(
             async_get_clientsession(self.hass),
-            username=username, perm_token=perm_token, vin=vin,
+            username=username, perm_token=perm_token, vin=vin, pin=pin,
         )
         try:
             await api.async_refresh()
@@ -38,6 +40,14 @@ class OnStarConfigFlow(ConfigFlow, domain=DOMAIN):
             return "invalid_auth"
         except Exception:  # noqa: BLE001
             return "cannot_connect"
+        # 填了服务密码就顺手校验一下，避免装好了才发现写操作不能用
+        if pin:
+            try:
+                await api.async_verify_pin()
+            except OnStarPinError:
+                return "invalid_pin"
+            except Exception:  # noqa: BLE001
+                return "cannot_connect"
         return None
 
     # ---------- 首次配置 ----------
@@ -48,10 +58,12 @@ class OnStarConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             username = user_input[CONF_USERNAME].strip()
             vin = user_input[CONF_VIN].strip().upper()
+            pin = (user_input.get(CONF_PIN) or "").strip()
             await self.async_set_unique_id(vin)
             self._abort_if_unique_id_configured()
 
-            err = await self._check(username, user_input[CONF_PERM_TOKEN].strip(), vin)
+            err = await self._check(username, user_input[CONF_PERM_TOKEN].strip(),
+                                    vin, pin)
             if err:
                 errors["base"] = err
             else:
@@ -61,6 +73,7 @@ class OnStarConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_USERNAME: username,
                         CONF_PERM_TOKEN: user_input[CONF_PERM_TOKEN].strip(),
                         CONF_VIN: vin,
+                        CONF_PIN: pin,
                     },
                 )
 
@@ -77,7 +90,9 @@ class OnStarConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             username = user_input[CONF_USERNAME].strip()
             vin = user_input[CONF_VIN].strip().upper()
-            err = await self._check(username, user_input[CONF_PERM_TOKEN].strip(), vin)
+            pin = (user_input.get(CONF_PIN) or "").strip()
+            err = await self._check(username, user_input[CONF_PERM_TOKEN].strip(),
+                                    vin, pin)
             if err:
                 errors["base"] = err
             else:
@@ -87,12 +102,14 @@ class OnStarConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_USERNAME: username,
                         CONF_PERM_TOKEN: user_input[CONF_PERM_TOKEN].strip(),
                         CONF_VIN: vin,
+                        CONF_PIN: pin,
                     },
                 )
         else:
             user_input = {
                 CONF_USERNAME: entry.data[CONF_USERNAME],
                 CONF_VIN: entry.data[CONF_VIN],
+                CONF_PIN: entry.data.get(CONF_PIN, ""),
                 CONF_PERM_TOKEN: "",
             }
         return self.async_show_form(

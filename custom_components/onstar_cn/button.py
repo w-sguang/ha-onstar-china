@@ -7,9 +7,10 @@ from homeassistant.components import persistent_notification
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .api import OnStarApi
+from .api import OnStarApi, OnStarError
 from .const import (
     CMD_CANCEL_FLASH, CMD_CANCEL_START, CMD_FLASH, CMD_START, DOMAIN, EVENT_COMMAND,
 )
@@ -52,24 +53,26 @@ class OnStarButton(ButtonEntity):
 
     async def async_press(self) -> None:
         _LOGGER.debug("按下 %s -> %s", self.name, self._cmd)
-        await self._api.async_run(self._cmd)
-        self._report()
+        try:
+            await self._api.async_run(self._cmd)
+        except OnStarError as err:
+            self._report(ok=False, res=self._api.last_result or {})
+            raise HomeAssistantError(f"安吉星「{self.name}」失败：{err}") from err
+        self._report(ok=True, res=self._api.last_result or {})
 
-    def _report(self) -> None:
-        res = self._api.last_result or {}
-        status = str(res.get("status", "unknown")).lower()
-        ok = status in ("success", "succeeded")
+    def _report(self, ok: bool, res: dict) -> None:
         self.hass.bus.async_fire(EVENT_COMMAND, {
             "name": self.name, "cmd": self._cmd,
             "success": ok, "status": res.get("status"),
             "message": res.get("message"),
         })
-        if not ok:
-            persistent_notification.async_create(
-                self.hass,
-                f"「{self.name}」执行失败\n状态：{res.get('status')}\n信息：{res.get('message') or '无'}",
-                title="安吉星指令失败",
-                notification_id="onstar_cn_cmd",
-            )
-        else:
+        if ok:
             persistent_notification.async_dismiss(self.hass, "onstar_cn_cmd")
+            return
+        msg = res.get("message") or "未知错误"
+        title = "需要服务密码" if "服务密码" in msg else "安吉星指令失败"
+        persistent_notification.async_create(
+            self.hass,
+            f"「{self.name}」执行失败\n状态：{res.get('status')}\n信息：{msg}",
+            title=title, notification_id="onstar_cn_cmd",
+        )

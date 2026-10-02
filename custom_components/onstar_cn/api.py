@@ -3,21 +3,31 @@
 加密: AES-128-CBC, key=iv="360fe65ae392fec2", base64(PKCS7)
 刷新: POST /sos/miniapp/v1/oauth/refresh {permToken, username}
 指令: POST /sos/vehoa/v2/remote/control {type, vin, requestChannel}
+写操作(锁车/解锁/启动/鸣笛)需先校验服务密码:
+      POST /sos/personoa/v1/pin/verifyPin {pin, vin}  —— 服务端下发会话 cookie，
+      后续指令必须带上同一 cookie，否则报 E7011。
 """
 from __future__ import annotations
 
 import asyncio
 import base64
+import datetime as _dt
 import json
 import logging
 import time
 
 import aiohttp
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from .const import (
-    AES_KEY, BASE, CLIENT_INFO, CLIENT_VERSION, TOKEN_MARGIN,
+    AES_KEY,
+    BASE,
+    CLIENT_INFO,
+    CLIENT_VERSION,
+    CMDS_NEED_PIN,
+    PIN_TTL,
+    TOKEN_MARGIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,6 +41,10 @@ class OnStarAuthError(OnStarError):
     """凭据/令牌失效，需要重新提供 perm_token。"""
 
 
+class OnStarPinError(OnStarError):
+    """服务密码(PIN)缺失或校验失败。"""
+
+
 def encrypt_body(plaintext: str) -> str:
     """与小程序 utils/encryption.js encryptBody 一致。"""
     padder = padding.PKCS7(128).padder()
@@ -42,16 +56,20 @@ def encrypt_body(plaintext: str) -> str:
 
 class OnStarApi:
     def __init__(self, session: aiohttp.ClientSession, username: str,
-                 perm_token: str, vin: str) -> None:
+                 perm_token: str, vin: str, pin: str | None = None) -> None:
         self._session = session
         self.username = username
         self.perm_token = perm_token
         self.vin = vin
+        self.pin = (pin or "").strip() or None
         self.access_token: str | None = None
         self.expires_at: float = 0.0
         self.expires_in: int = 0
         # 最近一次指令结果: {"cmd","status","message","time"}
         self.last_result: dict | None = None
+        # PIN 校验会话
+        self._pin_verified_at: float = 0.0
+        self._cookies: dict[str, str] = {}
 
     # ---------- 底层 ----------
     async def _post(self, path: str, body: dict | None, extra: dict | None = None,
@@ -63,6 +81,8 @@ class OnStarApi:
         }
         if auth and self.access_token:
             headers["Authorization"] = "Bearer " + self.access_token
+        if self._cookies:
+            headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
         if extra:
             headers.update(extra)
         async with self._session.post(
@@ -70,6 +90,9 @@ class OnStarApi:
             data=json.dumps(body) if body is not None else "",
             timeout=aiohttp.ClientTimeout(total=30),
         ) as resp:
+            # 服务端的会话 cookie 必须留存，写指令时回传
+            for k, v in resp.cookies.items():
+                self._cookies[k] = v.value
             text = await resp.text()
             try:
                 return json.loads(text)
@@ -105,17 +128,59 @@ class OnStarApi:
         if not self.access_token or time.time() > self.expires_at - TOKEN_MARGIN:
             await self.async_refresh()
 
-    # ---------- 远程指令 ----------
-    async def async_control(self, cmd: str) -> str:
+    # ---------- 服务密码(PIN) ----------
+    @property
+    def pin_configured(self) -> bool:
+        return self.pin is not None
+
+    async def async_verify_pin(self) -> None:
+        """校验服务密码，并保留服务端下发的会话 cookie。"""
+        if not self.pin:
+            raise OnStarPinError(
+                "未配置服务密码。安吉星对锁车/解锁/远程启动等**写操作**要求校验服务密码："
+                "请在「设置 → 设备与服务 → 安吉星 → 配置」里填写后重试。")
         await self.async_ensure_token()
         d = await self._post(
-            "/sos/vehoa/v2/remote/control",
-            {"type": cmd, "vin": self.vin, "requestChannel": "legacy"},
+            "/sos/personoa/v1/pin/verifyPin",
+            {"pin": self.pin, "vin": self.vin},
             {"client-user-id": self.username, "channel": "SOSWMP"},
         )
         if d.get("bizCode") != "E0000":
-            raise OnStarError(f"指令 {cmd} 失败: {d.get('bizCode')} {d.get('bizMsg')}")
-        return d["data"]["requestId"]
+            raise OnStarPinError(
+                f"服务密码校验失败：{d.get('bizMsg') or d.get('bizCode')}（请确认配置里的服务密码是否正确）")
+        self._pin_verified_at = time.time()
+
+    def _pin_fresh(self) -> bool:
+        return bool(self._pin_verified_at) and (
+            time.time() - self._pin_verified_at < PIN_TTL)
+
+    # ---------- 远程指令 ----------
+    async def async_control(self, cmd: str) -> str:
+        await self.async_ensure_token()
+        need_pin = cmd in CMDS_NEED_PIN
+        last_msg = ""
+        for attempt in (1, 2):
+            if need_pin and (attempt == 2 or not self._pin_fresh()):
+                await self.async_verify_pin()
+            d = await self._post(
+                "/sos/vehoa/v2/remote/control",
+                {"type": cmd, "vin": self.vin, "requestChannel": "legacy"},
+                {"client-user-id": self.username, "channel": "SOSWMP"},
+            )
+            code = d.get("bizCode")
+            if code == "E0000":
+                return d["data"]["requestId"]
+            last_msg = f"{code} {d.get('bizMsg')}"
+            # E7011 = 需验证 PIN：重新校验一次后再试（最多重试一次）
+            if need_pin and code == "E7011" and attempt == 1:
+                _LOGGER.debug("收到 E7011，重新校验服务密码后重试")
+                self._pin_verified_at = 0.0
+                continue
+            if code == "E7011":
+                raise OnStarPinError(
+                    f"指令被拒绝（{last_msg}）：服务密码校验未通过，请在集成配置里检查服务密码。")
+            raise OnStarError(f"指令 {cmd} 失败: {last_msg}")
+        raise OnStarError(f"指令 {cmd} 失败: {last_msg}")
 
     async def async_result(self, request_id: str) -> dict:
         await self.async_ensure_token()
@@ -128,7 +193,6 @@ class OnStarApi:
 
     async def async_run(self, cmd: str, timeout: int = 120, interval: int = 3) -> dict:
         """下发指令并轮询结果。结果写入 self.last_result。"""
-        import datetime as _dt
         try:
             rid = await self.async_control(cmd)
         except OnStarError as err:
