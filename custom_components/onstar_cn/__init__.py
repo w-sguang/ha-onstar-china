@@ -13,7 +13,7 @@ from .coordinator import OnStarCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["lock", "button", "sensor"]
+PLATFORMS = ["lock", "button", "sensor", "binary_sensor"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
