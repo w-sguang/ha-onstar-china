@@ -1,0 +1,39 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "安吉星 (OnStar China)",
+        "description": "需要从安吉星**微信小程序**抓一次登录请求（安吉星不允许微信外直接用账号密码登录）。\n\n获取方法：\n1. 用抓包工具（Reqable/Charles）抓小程序登录请求\n2. 把 HAR 文件用 `extract_token.py` 一跑，就得到下面三项\n\n• 用户 ID：idpUserId（形如 LADPA017243106）\n• perm_token：登录响应里的 perm_token\n• 车架号 VIN：17 位",
+        "data": {
+          "username": "用户 ID (idpUserId)",
+          "perm_token": "perm_token",
+          "vin": "车架号 VIN"
+        }
+      },
+      "reconfigure": {
+        "title": "修改安吉星凭据",
+        "description": "更新用户 ID / perm_token / 车架号。",
+        "data": {
+          "username": "用户 ID (idpUserId)",
+          "perm_token": "perm_token",
+          "vin": "车架号 VIN"
+        }
+      },
+      "reauth_confirm": {
+        "title": "安吉星登录已失效",
+        "description": "车辆 {vin} 的 perm_token 已失效（可能因为账号在别处重新登录过）。\n请在微信小程序里重新登录一次并抓包，用 extract_token.py 取出新的 perm_token 后填到下面。",
+        "data": {
+          "perm_token": "新的 perm_token"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "认证失败：perm_token 或用户 ID 不正确（或已失效）",
+      "cannot_connect": "无法连接到安吉星服务器"
+    },
+    "abort": {
+      "already_configured": "该车辆已配置",
+      "reauth_successful": "重新认证成功"
+    }
+  }
+}
