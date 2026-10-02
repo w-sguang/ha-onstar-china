@@ -174,15 +174,24 @@ class OnStarApi:
 
     @staticmethod
     def parse_diagnostics(res: dict) -> dict:
-        """把诊断结果解析成 {name: {value, unit}}。"""
+        """把诊断结果解析成 {name: {value, unit, message}}（_meta 为数据时间）。"""
         out: dict = {}
-        try:
-            elems = res["body"]["diagnosticResponse"][0]["diagnosticElement"]
-        except (KeyError, IndexError, TypeError):
-            return out
-        for el in elems:
-            name = el.get("name")
-            if not name:
-                continue
-            out[name] = {"value": el.get("value"), "unit": el.get("unit", "")}
+        body = (res or {}).get("body") or {}
+        groups = body.get("diagnosticResponse") or []
+        if isinstance(groups, dict):
+            groups = [groups]
+        for grp in groups:
+            for el in (grp or {}).get("diagnosticElement") or []:
+                name = el.get("name")
+                if not name:
+                    continue
+                out[name] = {
+                    "value": el.get("value"),
+                    "unit": el.get("unit", ""),
+                    "message": el.get("message", ""),
+                }
+        out["_meta"] = {
+            "updated": (res or {}).get("completionTime"),
+            "requested": (res or {}).get("requestTime"),
+        }
         return out
