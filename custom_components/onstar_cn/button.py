@@ -14,6 +14,7 @@ from .api import OnStarApi, OnStarError
 from .const import (
     CMD_CANCEL_FLASH, CMD_CANCEL_START, CMD_FLASH, CMD_START, DOMAIN, EVENT_COMMAND,
 )
+from .entity import build_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,9 +29,12 @@ BUTTONS = [
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    api: OnStarApi = hass.data[DOMAIN][entry.entry_id]["api"]
+    data = hass.data[DOMAIN][entry.entry_id]
+    api: OnStarApi = data["api"]
+    vehicle = data.get("vehicle")
     async_add_entities(
-        OnStarButton(hass, api, entry, key, name, cmd) for key, name, cmd in BUTTONS
+        OnStarButton(hass, api, entry, vehicle, key, name, cmd)
+        for key, name, cmd in BUTTONS
     )
 
 
@@ -38,18 +42,13 @@ class OnStarButton(ButtonEntity):
     _attr_has_entity_name = True
 
     def __init__(self, hass: HomeAssistant, api: OnStarApi, entry: ConfigEntry,
-                 key: str, name: str, cmd: str) -> None:
+                 vehicle: dict | None, key: str, name: str, cmd: str) -> None:
         self.hass = hass
         self._api = api
         self._cmd = cmd
         self._attr_name = name
         self._attr_unique_id = f"{entry.data['vin']}_{key}"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.data["vin"])},
-            "name": f"安吉星 {entry.data['vin'][-6:]}",
-            "manufacturer": "OnStar China",
-            "model": "上汽通用 OnStar 车辆",
-        }
+        self._attr_device_info = build_device_info(entry.data["vin"], vehicle)
 
     async def async_press(self) -> None:
         _LOGGER.debug("按下 %s -> %s", self.name, self._cmd)

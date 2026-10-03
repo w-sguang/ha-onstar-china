@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .entity import build_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    async_add_entities([OnStarTirePressure(coordinator, entry)])
+    vehicle = hass.data[DOMAIN][entry.entry_id].get("vehicle")
+    async_add_entities([OnStarTirePressure(coordinator, entry, vehicle)])
 
 
 class OnStarTirePressure(CoordinatorEntity, BinarySensorEntity):
@@ -38,15 +40,11 @@ class OnStarTirePressure(CoordinatorEntity, BinarySensorEntity):
     _attr_icon = "mdi:tire"
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
 
-    def __init__(self, coordinator, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator, entry: ConfigEntry,
+                 vehicle: dict | None = None) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.data['vin']}_tire_warning"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.data["vin"])},
-            "name": f"安吉星 {entry.data['vin'][-6:]}",
-            "manufacturer": "OnStar China",
-            "model": "上汽通用 OnStar 车辆",
-        }
+        self._attr_device_info = build_device_info(entry.data["vin"], vehicle)
 
     @property
     def is_on(self):

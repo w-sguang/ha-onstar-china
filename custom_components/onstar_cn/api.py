@@ -99,6 +99,41 @@ class OnStarApi:
             except ValueError as err:
                 raise OnStarError(f"非 JSON 响应 ({resp.status}): {text[:200]}") from err
 
+    async def _get(self, path: str, extra: dict | None = None,
+                   auth: bool = True) -> dict:
+        headers = {
+            "CLIENT-INFO": CLIENT_INFO,
+            "CLIENT-VERSION": CLIENT_VERSION,
+        }
+        if auth and self.access_token:
+            headers["Authorization"] = "Bearer " + self.access_token
+        if self._cookies:
+            headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
+        if extra:
+            headers.update(extra)
+        async with self._session.get(
+            BASE + path, headers=headers,
+            timeout=aiohttp.ClientTimeout(total=30),
+        ) as resp:
+            for k, v in resp.cookies.items():
+                self._cookies[k] = v.value
+            text = await resp.text()
+            try:
+                return json.loads(text)
+            except ValueError as err:
+                raise OnStarError(f"非 JSON 响应 ({resp.status}): {text[:200]}") from err
+
+    # ---------- 车辆信息（品牌/车型/年款） ----------
+    async def async_vehicle_info(self) -> dict:
+        """GET /sos/mobileaggr/v1/user/<idpUserId>/suite → currentSuite.vehicle。
+
+        含 modelDesc(别克 君威)、year(2023)、brand(BUICK)、makeDesc(上汽通用) 等。
+        """
+        await self.async_ensure_token()
+        d = await self._get(f"/sos/mobileaggr/v1/user/{self.username}/suite")
+        suite = d.get("currentSuite") or {}
+        return suite.get("vehicle") or {}
+
     # ---------- token ----------
     async def async_refresh(self) -> None:
         d = await self._post(

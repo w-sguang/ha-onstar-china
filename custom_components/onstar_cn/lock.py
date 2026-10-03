@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import OnStarApi, OnStarError
 from .const import CMD_LOCK, CMD_UNLOCK, DOMAIN, EVENT_COMMAND
+from .entity import build_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,7 +21,9 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     data = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([OnStarLock(hass, data["api"], entry)])
+    async_add_entities(
+        [OnStarLock(hass, data["api"], entry, data.get("vehicle"))]
+    )
 
 
 class OnStarLock(LockEntity):
@@ -28,16 +31,12 @@ class OnStarLock(LockEntity):
     _attr_name = "车门锁"
     _attr_assumed_state = True
 
-    def __init__(self, hass: HomeAssistant, api: OnStarApi, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, api: OnStarApi, entry: ConfigEntry,
+                 vehicle: dict | None = None) -> None:
         self.hass = hass
         self._api = api
         self._attr_unique_id = f"{entry.data['vin']}_lock"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.data["vin"])},
-            "name": f"安吉星 {entry.data['vin'][-6:]}",
-            "manufacturer": "OnStar China",
-            "model": "上汽通用 OnStar 车辆",
-        }
+        self._attr_device_info = build_device_info(entry.data["vin"], vehicle)
 
     async def _do(self, cmd: str, locked: bool) -> None:
         name = "上锁" if locked else "解锁"

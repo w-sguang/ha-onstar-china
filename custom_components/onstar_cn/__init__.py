@@ -30,11 +30,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await api.async_refresh()
     except OnStarAuthError as err:
         raise ConfigEntryAuthFailed(str(err)) from err
+
+    # 车辆品牌/车型/年款（非关键，失败也不影响集成）
+    vehicle: dict = {}
+    try:
+        vehicle = await api.async_vehicle_info()
+        _LOGGER.debug("车辆信息: %s", vehicle)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("获取车辆品牌/型号失败（不影响使用）: %s", err)
+
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "api": api,
         "coordinator": coordinator,
+        "vehicle": vehicle,
     }
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

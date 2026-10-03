@@ -7,11 +7,13 @@ from homeassistant.components.sensor import (
     SensorDeviceClass, SensorEntity, SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, EVENT_COMMAND
+from .entity import build_device_info, vehicle_display
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,27 +51,23 @@ SENSORS = [
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator = data["coordinator"]
+    vehicle = data.get("vehicle") or {}
     async_add_entities(
-        OnStarSensor(coordinator, entry, *spec) for spec in SENSORS
+        OnStarSensor(coordinator, entry, vehicle, *spec) for spec in SENSORS
     )
-    async_add_entities([OnStarLastCommand(hass, entry)])
-
-
-def _device_info(entry: ConfigEntry) -> dict:
-    return {
-        "identifiers": {(DOMAIN, entry.data["vin"])},
-        "name": f"安吉星 {entry.data['vin'][-6:]}",
-        "manufacturer": "OnStar China",
-        "model": "上汽通用 OnStar 车辆",
-    }
+    async_add_entities([
+        OnStarVehicleInfo(entry, vehicle),
+        OnStarLastCommand(hass, entry, vehicle),
+    ])
 
 
 class OnStarSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, entry, key, name, field, unit, dclass, sclass,
-                 icon):
+    def __init__(self, coordinator, entry, vehicle, key, name, field, unit, dclass,
+                 sclass, icon):
         super().__init__(coordinator)
         self._field = field
         self._attr_name = name
@@ -78,7 +76,7 @@ class OnStarSensor(CoordinatorEntity, SensorEntity):
         self._attr_state_class = sclass
         self._attr_icon = icon
         self._attr_unique_id = f"{entry.data['vin']}_{key}"
-        self._attr_device_info = _device_info(entry)
+        self._attr_device_info = build_device_info(entry.data["vin"], vehicle)
 
     @property
     def native_value(self):
@@ -103,6 +101,44 @@ class OnStarSensor(CoordinatorEntity, SensorEntity):
         return attrs
 
 
+class OnStarVehicleInfo(SensorEntity):
+    """车辆品牌 / 车型 / 年款（来自 /suite 接口，静态信息）。"""
+
+    _attr_has_entity_name = True
+    _attr_name = "车辆信息"
+    _attr_icon = "mdi:car-info"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, entry: ConfigEntry, vehicle: dict | None) -> None:
+        self._vehicle = vehicle or {}
+        self._attr_unique_id = f"{entry.data['vin']}_vehicle_info"
+        self._attr_device_info = build_device_info(entry.data["vin"], vehicle)
+
+    @property
+    def native_value(self):
+        _, model = vehicle_display(self._vehicle)
+        return model or None
+
+    @property
+    def extra_state_attributes(self):
+        v = self._vehicle
+        brand, _ = vehicle_display(v)
+        attrs = {}
+        if brand:
+            attrs["品牌"] = brand
+        if (v.get("brand") or "").strip():
+            attrs["品牌代码"] = v["brand"].strip()
+        if (v.get("seriesNameCN") or "").strip():
+            attrs["车系"] = v["seriesNameCN"].strip()
+        if (v.get("year") or "").strip():
+            attrs["年款"] = v["year"].strip()
+        if (v.get("makeDesc") or "").strip():
+            attrs["制造商"] = v["makeDesc"].strip()
+        if (v.get("generationDescription") or "").strip():
+            attrs["车机世代"] = v["generationDescription"].strip()
+        return attrs
+
+
 class OnStarLastCommand(SensorEntity):
     """显示最近一次远程指令的执行结果。"""
 
@@ -110,10 +146,11 @@ class OnStarLastCommand(SensorEntity):
     _attr_name = "最后指令结果"
     _attr_icon = "mdi:history"
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry,
+                 vehicle: dict | None = None) -> None:
         self.hass = hass
         self._attr_unique_id = f"{entry.data['vin']}_last_command"
-        self._attr_device_info = _device_info(entry)
+        self._attr_device_info = build_device_info(entry.data["vin"], vehicle)
         self._state = "无"
         self._attrs: dict = {}
 
